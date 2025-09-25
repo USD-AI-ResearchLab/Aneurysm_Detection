@@ -1,5 +1,5 @@
 name: Sync Aneurysm_Detection from Upstream
-
+ 
 on:
   schedule:
     - cron: '0 19 * * *'   # daily at 19:00 UTC
