@@ -1,34 +1,15 @@
-name: Sync Aneurysm_Detection from Upstream
- 
+name: Sync from Upstream
+
 on:
   schedule:
-    - cron: '0 19 * * *'   # daily at 19:00 UTC
+    - cron: "10 9 * * *"   # daily at 09:10 UTC
   workflow_dispatch:
-
-permissions:
-  contents: write
-  pull-requests: write
 
 jobs:
   sync:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout this repo
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Add upstream and fetch
-        run: |
-          git remote add upstream https://github.com/2ai-lab/Aneurysm_Detection.git
-          git fetch upstream
-
-      - name: Merge upstream/main into main
-        run: |
-          git checkout main
-          git merge --no-edit upstream/main || true
-
-      - name: Push to origin
-        run: |
-          git push origin main
+    uses: 2ai-lab/.github/.github/workflows/reusable-sync-upstream.yml@main
+    with:
+      upstream_url: https://github.com/2ai-lab/Aneurysm_Detection.git
+      mode: "push"   # use "pr" if branch protection requires PRs
+    secrets:
+      # push_token: ${{ secrets.PAT }}   # only needed if GITHUB_TOKEN cannot push
