@@ -2,14 +2,17 @@ name: Sync Aneurysm_Detection from Upstream
 
 on:
   schedule:
-    - cron: "0 19 * * *"    # daily at 02:00 PM
+    - cron: '0 19 * * *'   # daily at 19:00 UTC (2:00 PM CDT)
   workflow_dispatch:
+
+# Needed if the reusable workflow will push commits
+permissions:
+  contents: write
 
 jobs:
   sync:
-    uses: 2ai-lab/.github/.github/workflows/reusable-sync-upstream.yml@main
+    uses: 2ai-lab/.github/workflows/reusable-sync-upstream.yml@main
     with:
       upstream_url: https://github.com/2ai-lab/Aneurysm_Detection.git
-      mode: "push"   # change to "pr" if branch protected
-    secrets:
-      # push_token: ${{ secrets.PAT }}   # enable if private repo / special permissions
+      mode: push          # change to "pr" if your default branch is protected
+    secrets: inherit       # passes repo secrets to the reusable workflow
