@@ -1,16 +1,15 @@
-name: Sync Aneurysm_Detection from Upstream (PR)
+name: Sync Aneurysm_Detection from Upstream (Push)
 
 on:
   schedule:
     - cron: '0 19 * * *'   # daily at 19:00 UTC (⚠️ cron won’t fire on forks)
-  workflow_dispatch:        # lets you run manually from Actions tab
-  push:                     # useful for testing — runs when this file changes
+  workflow_dispatch:        # run manually from Actions tab
+  push:                     # test by committing this file
     paths:
       - '.github/workflows/Aneurysm_Detection_sync.yml'
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   sync:
@@ -36,30 +35,11 @@ jobs:
           git remote add upstream "${UPSTREAM_REPO}"
           git fetch upstream "${UPSTREAM_BRANCH}"
 
-      - name: Merge upstream into a new sync branch
+      - name: Merge upstream and push
         run: |
-          BRANCH="sync/upstream-$(date +%Y%m%d-%H%M%S)"
-          echo "BRANCH=$BRANCH" >> $GITHUB_ENV
           git checkout "${BASE_BRANCH}"
-          git checkout -B "$BRANCH"
-          set -e
           git merge --no-edit "upstream/${UPSTREAM_BRANCH}" || {
             echo "::error::Automatic merge failed. Resolve conflicts manually."
             exit 1
           }
-
-      - name: Open pull request
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "Sync from upstream 2ai-lab/Aneurysm_Detection"
-          title: "Sync: upstream → main"
-          body: |
-            Automated sync from **2ai-lab/Aneurysm_Detection**.
-            - Base: `${{ env.BASE_BRANCH }}`
-            - Upstream branch: `${{ env.UPSTREAM_BRANCH }}`
-            - Created by GitHub Actions.
-          branch: ${{ env.BRANCH }}
-          base: ${{ env.BASE_BRANCH }}
-          labels: auto-sync
-          draft: false
+          git push origin "${BASE_BRANCH}"
