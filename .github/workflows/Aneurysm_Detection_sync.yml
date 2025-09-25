@@ -1,12 +1,10 @@
 name: Sync from Upstream (Aneurysm_Detection)
 
 on:
-  # ⚠️ Cron is ignored on forks; it will work after you detach from fork or use a scheduler repo.
-  # Daily at 09:00 CST/CDT equivalent in UTC (two entries handle DST):
+  # Daily at 09:00 US Central. (Note: schedule is ignored while this repo is a fork.)
   schedule:
     - cron: "0 15 * * *"   # 09:00 CST (UTC-6)
     - cron: "0 14 * * *"   # 09:00 CDT (UTC-5)
-
   workflow_dispatch:
     inputs:
       mode:
@@ -14,17 +12,16 @@ on:
         required: false
         default: pr
       branches:
-        description: "Comma-separated branches to sync"
+        description: "Comma-separated branches"
         required: false
         default: main
       include_tags:
-        description: "Also sync tags? true/false"
+        description: "Sync tags? true/false"
         required: false
         default: "false"
-
-  # While this repo is still a fork, editing THIS file will trigger a run for testing.
+  # While this repo is a fork, editing THIS file triggers a run for testing.
   push:
-    branches: [ main ]                         # ← change if your default branch isn't 'main'
+    branches: [ main ]                           # change if your default branch isn't 'main'
     paths:
       - ".github/workflows/Aneurysm_Detection_sync.yml"
 
@@ -36,34 +33,30 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     env:
-      # Upstream repo to sync from:
       UPSTREAM_URL: https://github.com/2ai-lab/Aneurysm_Detection.git
-
-      MODE:         ${{ github.event.inputs.mode || 'pr' }}       # 'push' to mirror, 'pr' to review
+      MODE:         ${{ github.event.inputs.mode || 'pr' }}
       BRANCHES:     ${{ github.event.inputs.branches || 'main' }}
       INCLUDE_TAGS: ${{ github.event.inputs.include_tags || 'false' }}
-
-      # Tokens used for git pushes and gh CLI (PAT optional; GITHUB_TOKEN works for most public repos)
       PUSH_TOKEN:   ${{ secrets.PAT || github.token }}
-      GH_TOKEN:     ${{ secrets.PAT || github.token }}
 
     steps:
-      - name: Checkout
+      - name: Checkout fork
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ env.PUSH_TOKEN }}
 
-      - name: Configure git author
+      - name: Configure git
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Add upstream remote & fetch
+      - name: Add upstream & fetch
         run: |
+          set -euo pipefail
           git remote remove upstream || true
           git remote add upstream "$UPSTREAM_URL"
-          if [ "$INCLUDE_TAGS" = "true" ]; then
+          if [ "${{ env.INCLUDE_TAGS }}" = "true" ]; then
             git fetch upstream --tags --prune
           else
             git fetch upstream --prune
@@ -73,7 +66,8 @@ jobs:
         if: ${{ env.MODE == 'push' }}
         shell: bash
         run: |
-          IFS=',' read -ra BR <<< "$BRANCHES"
+          set -euo pipefail
+          IFS=',' read -ra BR <<< "${{ env.BRANCHES }}"
           for b in "${BR[@]}"; do
             b="$(echo "$b" | xargs)"
             echo "Mirroring branch: $b"
@@ -82,37 +76,52 @@ jobs:
             git push origin "$b" --force
           done
 
-      - name: PR mode (safe / works with protected branches)
+      # ---------- PR MODE (safer; works with protected branches) ----------
+      - name: Prepare sync commit (PR mode)
         if: ${{ env.MODE == 'pr' }}
         shell: bash
         run: |
-          IFS=',' read -ra BR <<< "$BRANCHES"
+          set -euo pipefail
+          IFS=',' read -ra BR <<< "${{ env.BRANCHES }}"
           for b in "${BR[@]}"; do
             b="$(echo "$b" | xargs)"
-            echo "Preparing PR for branch: $b"
-            git checkout -B "$b" || git checkout -b "$b"
-            git fetch upstream "$b" || { echo "::error::Upstream branch '$b' not found."; exit 1; }
+            echo "Syncing branch for PR: $b"
 
+            # Ensure local branch exists
+            git checkout -B "$b" || git checkout -b "$b"
+
+            # Try fast-forward first
             set +e
-            git rebase "upstream/$b"
+            git merge --ff-only "upstream/$b"
             rc=$?
             set -e
 
-            if [ $rc -ne 0 ]; then
-              echo "Rebase conflict; creating merge PR branch."
-              git rebase --abort || true
-              git checkout -B "$b-sync-upstream"
-              git merge --no-ff --no-edit "upstream/$b" || true
+            if [ $rc -eq 0 ]; then
+              echo "Fast-forward succeeded for $b. Creating lightweight commit if there are changes."
             else
-              git checkout -B "$b-sync-upstream"
+              echo "Not fast-forward; merge upstream into a PR branch."
             fi
 
-            git push origin "$b-sync-upstream" --force
-            gh pr create \
-              --title "Sync from upstream ($b)" \
-              --body  "Automated sync from $UPSTREAM_URL on branch $b." \
-              --base "$b" \
-              --head "$b-sync-upstream" \
-            || gh pr edit "$b-sync-upstream" \
-              --title "Sync from upstream ($b)" \
-              --body  "Automated sync from $UPSTREAM_URL on branch $b."
+            # Create/update PR branch from current state
+            PR_BRANCH="sync/${b}"
+            git checkout -B "$PR_BRANCH"
+            git merge --no-ff --no-edit "upstream/$b" || true
+
+            # Push PR branch
+            git push origin "$PR_BRANCH" --force
+          done
+
+      - name: Open/Update PR
+        if: ${{ env.MODE == 'pr' }}
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ env.PUSH_TOKEN }}
+          commit-message: "chore(sync): update from upstream"
+          title: "Sync from upstream"
+          body: |
+            Automated sync from ${{ env.UPSTREAM_URL }}.
+            - Branches: `${{ env.BRANCHES }}`
+            - Mode: PR
+          branch: sync/${{ env.BRANCHES }}     # works when BRANCHES is a single branch (default: main)
+          base: ${{ env.BRANCHES }}
+          delete-branch: false
