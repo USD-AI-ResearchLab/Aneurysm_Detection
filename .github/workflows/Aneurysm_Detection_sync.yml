@@ -1,9 +1,12 @@
-name: Sync from Upstream
+name: Sync from Upstream (Aneurysm_Detection)
 
 on:
-  # NOTE: cron won't run while this repo is a fork.
+  # ⚠️ Cron is ignored on forks; it will work after you detach from fork or use a scheduler repo.
+  # Daily at 09:00 CST/CDT equivalent in UTC (two entries handle DST):
   schedule:
-    - cron: "0 19 * * *"   # daily at 19:00 UTC
+    - cron: "0 15 * * *"   # 09:00 CST (UTC-6)
+    - cron: "0 14 * * *"   # 09:00 CDT (UTC-5)
+
   workflow_dispatch:
     inputs:
       mode:
@@ -11,13 +14,19 @@ on:
         required: false
         default: pr
       branches:
-        description: "Comma-separated branches"
+        description: "Comma-separated branches to sync"
         required: false
         default: main
       include_tags:
-        description: "Sync tags? true/false"
+        description: "Also sync tags? true/false"
         required: false
         default: "false"
+
+  # While this repo is still a fork, editing THIS file will trigger a run for testing.
+  push:
+    branches: [ main ]                         # ← change if your default branch isn't 'main'
+    paths:
+      - ".github/workflows/Aneurysm_Detection_sync.yml"
 
 permissions:
   contents: write
@@ -27,13 +36,16 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     env:
-      # === EDITED FOR THIS REPO ===
+      # Upstream repo to sync from:
       UPSTREAM_URL: https://github.com/2ai-lab/Aneurysm_Detection.git
 
-      MODE:         ${{ github.event.inputs.mode || 'pr' }}
+      MODE:         ${{ github.event.inputs.mode || 'pr' }}       # 'push' to mirror, 'pr' to review
       BRANCHES:     ${{ github.event.inputs.branches || 'main' }}
       INCLUDE_TAGS: ${{ github.event.inputs.include_tags || 'false' }}
+
+      # Tokens used for git pushes and gh CLI (PAT optional; GITHUB_TOKEN works for most public repos)
       PUSH_TOKEN:   ${{ secrets.PAT || github.token }}
+      GH_TOKEN:     ${{ secrets.PAT || github.token }}
 
     steps:
       - name: Checkout
@@ -42,17 +54,17 @@ jobs:
           fetch-depth: 0
           token: ${{ env.PUSH_TOKEN }}
 
-      - name: Configure git
+      - name: Configure git author
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Add upstream + fetch
+      - name: Add upstream remote & fetch
         run: |
           git remote remove upstream || true
           git remote add upstream "$UPSTREAM_URL"
           if [ "$INCLUDE_TAGS" = "true" ]; then
-            git fetch --tags upstream --prune
+            git fetch upstream --tags --prune
           else
             git fetch upstream --prune
           fi
@@ -63,19 +75,21 @@ jobs:
         run: |
           IFS=',' read -ra BR <<< "$BRANCHES"
           for b in "${BR[@]}"; do
-            b=$(echo "$b" | xargs)
+            b="$(echo "$b" | xargs)"
+            echo "Mirroring branch: $b"
             git checkout -B "$b" || git checkout -b "$b"
             git reset --hard "upstream/$b" || { echo "::error::Upstream branch '$b' not found."; exit 1; }
             git push origin "$b" --force
           done
 
-      - name: PR mode (safe for protected branches)
+      - name: PR mode (safe / works with protected branches)
         if: ${{ env.MODE == 'pr' }}
         shell: bash
         run: |
           IFS=',' read -ra BR <<< "$BRANCHES"
           for b in "${BR[@]}"; do
-            b=$(echo "$b" | xargs)
+            b="$(echo "$b" | xargs)"
+            echo "Preparing PR for branch: $b"
             git checkout -B "$b" || git checkout -b "$b"
             git fetch upstream "$b" || { echo "::error::Upstream branch '$b' not found."; exit 1; }
 
@@ -85,6 +99,7 @@ jobs:
             set -e
 
             if [ $rc -ne 0 ]; then
+              echo "Rebase conflict; creating merge PR branch."
               git rebase --abort || true
               git checkout -B "$b-sync-upstream"
               git merge --no-ff --no-edit "upstream/$b" || true
