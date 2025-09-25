@@ -1,45 +1,103 @@
-name: Sync Aneurysm_Detection from Upstream (Push)
+name: Sync from Upstream
 
 on:
+  # NOTE: cron won't run while this repo is a fork.
   schedule:
-    - cron: '0 19 * * *'   # daily at 19:00 UTC (⚠️ cron won’t fire on forks)
-  workflow_dispatch:        # run manually from Actions tab
-  push:                     # test by committing this file
-    paths:
-      - '.github/workflows/Aneurysm_Detection_sync.yml'
+    - cron: "0 19 * * *"   # daily at 19:00 UTC
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "push (mirror) or pr (open PR)"
+        required: false
+        default: pr
+      branches:
+        description: "Comma-separated branches"
+        required: false
+        default: main
+      include_tags:
+        description: "Sync tags? true/false"
+        required: false
+        default: "false"
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     env:
-      UPSTREAM_REPO: https://github.com/2ai-lab/Aneurysm_Detection.git
-      UPSTREAM_BRANCH: main
-      BASE_BRANCH: main
+      # === EDITED FOR THIS REPO ===
+      UPSTREAM_URL: https://github.com/2ai-lab/Aneurysm_Detection.git
+
+      MODE:         ${{ github.event.inputs.mode || 'pr' }}
+      BRANCHES:     ${{ github.event.inputs.branches || 'main' }}
+      INCLUDE_TAGS: ${{ github.event.inputs.include_tags || 'false' }}
+      PUSH_TOKEN:   ${{ secrets.PAT || github.token }}
+
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ env.PUSH_TOKEN }}
 
-      - name: Configure git user
+      - name: Configure git
         run: |
-          git config user.name "github-actions[bot]"
+          git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Add upstream and fetch
+      - name: Add upstream + fetch
         run: |
-          git remote add upstream "${UPSTREAM_REPO}"
-          git fetch upstream "${UPSTREAM_BRANCH}"
+          git remote remove upstream || true
+          git remote add upstream "$UPSTREAM_URL"
+          if [ "$INCLUDE_TAGS" = "true" ]; then
+            git fetch --tags upstream --prune
+          else
+            git fetch upstream --prune
+          fi
 
-      - name: Merge upstream and push
+      - name: Push mode (mirror/overwrite)
+        if: ${{ env.MODE == 'push' }}
+        shell: bash
         run: |
-          git checkout "${BASE_BRANCH}"
-          git merge --no-edit "upstream/${UPSTREAM_BRANCH}" || {
-            echo "::error::Automatic merge failed. Resolve conflicts manually."
-            exit 1
-          }
-          git push origin "${BASE_BRANCH}"
+          IFS=',' read -ra BR <<< "$BRANCHES"
+          for b in "${BR[@]}"; do
+            b=$(echo "$b" | xargs)
+            git checkout -B "$b" || git checkout -b "$b"
+            git reset --hard "upstream/$b" || { echo "::error::Upstream branch '$b' not found."; exit 1; }
+            git push origin "$b" --force
+          done
+
+      - name: PR mode (safe for protected branches)
+        if: ${{ env.MODE == 'pr' }}
+        shell: bash
+        run: |
+          IFS=',' read -ra BR <<< "$BRANCHES"
+          for b in "${BR[@]}"; do
+            b=$(echo "$b" | xargs)
+            git checkout -B "$b" || git checkout -b "$b"
+            git fetch upstream "$b" || { echo "::error::Upstream branch '$b' not found."; exit 1; }
+
+            set +e
+            git rebase "upstream/$b"
+            rc=$?
+            set -e
+
+            if [ $rc -ne 0 ]; then
+              git rebase --abort || true
+              git checkout -B "$b-sync-upstream"
+              git merge --no-ff --no-edit "upstream/$b" || true
+            else
+              git checkout -B "$b-sync-upstream"
+            fi
+
+            git push origin "$b-sync-upstream" --force
+            gh pr create \
+              --title "Sync from upstream ($b)" \
+              --body  "Automated sync from $UPSTREAM_URL on branch $b." \
+              --base "$b" \
+              --head "$b-sync-upstream" \
+            || gh pr edit "$b-sync-upstream" \
+              --title "Sync from upstream ($b)" \
+              --body  "Automated sync from $UPSTREAM_URL on branch $b."
