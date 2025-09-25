@@ -2,11 +2,11 @@ name: Sync Aneurysm_Detection from Upstream (PR)
 
 on:
   schedule:
-    - cron: '0 19 * * *'   # daily at 19:00 UTC (note: cron won't run on forks)
-  workflow_dispatch:
-  push:
+    - cron: '0 19 * * *'   # daily at 19:00 UTC (⚠️ cron won’t fire on forks)
+  workflow_dispatch:        # lets you run manually from Actions tab
+  push:                     # useful for testing — runs when this file changes
     paths:
-      - '.github/workflows/Aneurysm_Detection_sync.yml'  # lets you test on commit
+      - '.github/workflows/Aneurysm_Detection_sync.yml'
 
 permissions:
   contents: write
@@ -17,8 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       UPSTREAM_REPO: https://github.com/2ai-lab/Aneurysm_Detection.git
-      UPSTREAM_BRANCH: main      # change if upstream uses a different default
-      BASE_BRANCH: main          # change if your repo's default branch differs
+      UPSTREAM_BRANCH: main
+      BASE_BRANCH: main
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -53,7 +53,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "Sync from upstream 2ai-lab/Aneurysm_Detection"
-          title: "Sync: upstream → ${UPSTREAM_BRANCH} into ${BASE_BRANCH}"
+          title: "Sync: upstream → main"
           body: |
             Automated sync from **2ai-lab/Aneurysm_Detection**.
             - Base: `${{ env.BASE_BRANCH }}`
