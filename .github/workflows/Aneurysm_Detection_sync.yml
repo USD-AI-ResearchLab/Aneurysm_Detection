@@ -2,8 +2,11 @@ name: Sync Aneurysm_Detection from Upstream (PR)
 
 on:
   schedule:
-    - cron: '0 19 * * *'     # daily at 19:00 UTC
+    - cron: '0 19 * * *'   # daily at 19:00 UTC (note: cron won't run on forks)
   workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/Aneurysm_Detection_sync.yml'  # lets you test on commit
 
 permissions:
   contents: write
@@ -12,6 +15,10 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    env:
+      UPSTREAM_REPO: https://github.com/2ai-lab/Aneurysm_Detection.git
+      UPSTREAM_BRANCH: main      # change if upstream uses a different default
+      BASE_BRANCH: main          # change if your repo's default branch differs
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -26,22 +33,17 @@ jobs:
 
       - name: Add upstream and fetch
         run: |
-          git remote add upstream https://github.com/2ai-lab/Aneurysm_Detection.git
-          git fetch upstream
+          git remote add upstream "${UPSTREAM_REPO}"
+          git fetch upstream "${UPSTREAM_BRANCH}"
 
-      # Change UPSTREAM_BRANCH or BASE_BRANCH below if yours differ
       - name: Merge upstream into a new sync branch
-        env:
-          UPSTREAM_BRANCH: main
-          BASE_BRANCH: main
         run: |
           BRANCH="sync/upstream-$(date +%Y%m%d-%H%M%S)"
           echo "BRANCH=$BRANCH" >> $GITHUB_ENV
-          git checkout "$BASE_BRANCH"
+          git checkout "${BASE_BRANCH}"
           git checkout -B "$BRANCH"
-          # Try a non-fast-forward merge (creates a merge commit if needed)
           set -e
-          git merge --no-edit "upstream/$UPSTREAM_BRANCH" || {
+          git merge --no-edit "upstream/${UPSTREAM_BRANCH}" || {
             echo "::error::Automatic merge failed. Resolve conflicts manually."
             exit 1
           }
@@ -51,13 +53,13 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "Sync from upstream 2ai-lab/Aneurysm_Detection"
-          title: "Sync: upstream → main"
+          title: "Sync: upstream → ${UPSTREAM_BRANCH} into ${BASE_BRANCH}"
           body: |
-            Automated daily sync from **2ai-lab/Aneurysm_Detection**.
-            - Base: `main`
-            - Upstream branch: `main`
+            Automated sync from **2ai-lab/Aneurysm_Detection**.
+            - Base: `${{ env.BASE_BRANCH }}`
+            - Upstream branch: `${{ env.UPSTREAM_BRANCH }}`
             - Created by GitHub Actions.
           branch: ${{ env.BRANCH }}
-          base: main
+          base: ${{ env.BASE_BRANCH }}
           labels: auto-sync
           draft: false
